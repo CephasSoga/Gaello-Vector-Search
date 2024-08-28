@@ -1,0 +1,4 @@
+.env
+tests
+*.toml
+**/__pycache__
