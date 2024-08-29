@@ -1,3 +1,7 @@
+import asyncio
+from functools import partial, wraps
+from typing import Optional, List, Dict
+
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 
@@ -5,6 +9,7 @@ from utils_vector.envhandler import get_env
 
 _DEFAULT_NUM_CANDIDATES = 50
 _DEFAULT_LIMIT = 50
+
 
 class VectorSearchManager:
     """
@@ -16,7 +21,8 @@ class VectorSearchManager:
         path: str,
         index: str, 
         num_candidates: int = _DEFAULT_NUM_CANDIDATES, 
-        limit: int = _DEFAULT_LIMIT, 
+        limit: int = _DEFAULT_LIMIT,
+        connec_client: Optional[MongoClient] = None 
         
         ):
         """
@@ -29,6 +35,7 @@ class VectorSearchManager:
             index (str, optional): The name of the vector index to use for the search.
             num_candidates (int, optional): The number of candidate documents to consider for the search. Defaults to 50.
             limit (int, optional): The maximum number of documents to return in the search results. Defaults to 50.
+            connec_client (Optional[MongoClient], optional): The MongoDB client to use/reuse. Defaults to None.
             
         """
 
@@ -38,9 +45,15 @@ class VectorSearchManager:
         self.index = index
         self.num_candidates = num_candidates
         self.limit = limit
-        
-        self.db_uri = get_env('MONGODB_URI')
-        self.client = MongoClient(self.db_uri, server_api=ServerApi('1'))
+
+
+        if not connec_client:
+            self.db_uri = get_env('MONGODB_URI')
+            self.client = MongoClient(self.db_uri, server_api=ServerApi('1'))
+        else:
+            self.client = connec_client
+
+
 
     def close(self):
         """
@@ -48,17 +61,11 @@ class VectorSearchManager:
         """
         self.client.close()
 
-    def request(self,  embedding, **fields):
-        """
-        Executes a vector search on the MongoDB collection.
+    async def request(self, embedding, **fields) -> List[Dict]:
+        async_func = self.async_wrap(self._request)
+        return await async_func(embedding, **fields)
 
-        Args:
-            embedding (list): The query vector for the search.
-            **fields: Additional fields to project in the search results.
-
-        Returns:
-            list: The search results as a list of documents.
-        """
+    def _request(self,  embedding, **fields) -> List[Dict]:
         db = self.client[self.database_name]
         collection = db[self.collection_name]
 
@@ -80,3 +87,11 @@ class VectorSearchManager:
         return list(collection.aggregate(pipeline))
     
 
+    def async_wrap(self, func):
+        @wraps(func)
+        async def run(*args, loop=None, executor=None, **kwargs):
+            if loop is None:
+                loop = asyncio.get_event_loop()
+            pfunc = partial(func, *args, **kwargs)
+            return await loop.run_in_executor(executor, pfunc)
+        return run

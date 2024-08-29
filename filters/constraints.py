@@ -3,79 +3,80 @@ import subprocess
 from typing import List, Any
 from dataclasses import dataclass
 
-import spacy
-from spacy import Language
-from spacy.tokens import Doc
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from nltk import pos_tag
+
+def download_nltk_data():
+    # Ensure necessary NLTK data is downloaded
+    nltk.download('punkt')
+    nltk.download('wordnet')
+    nltk.download('punkt_tab')
+    nltk.download('stopwords')
+    nltk.download('averaged_perceptron_tagger')
+    nltk.download('averaged_perceptron_tagger_eng')
 
 class Parser:
-
-    def minimize(self, nlp: Language, doc: Doc) -> str:
-        """Remove stop words and non-alphabetic tokens from the document."""
-        stop_words = nlp.Defaults.stop_words
-        min_qx = [token.text for token in doc if token.is_alpha and token.text.lower() not in stop_words]
-        return "".join(min_qx)
+    def minimize(self, text: str) -> str:
+        """Remove stop words and non-alphabetic tokens from the text."""
+        stop_words = set(stopwords.words('english'))
+        words = word_tokenize(text)
+        min_qx = [word for word in words if word.isalpha() and word.lower() not in stop_words]
+        return " ".join(min_qx)
     
-    def extract_kwds(self, doc: Doc) -> List[str]:
-        """Extract nouns from the document."""
-        nouns = [token.text for token in doc if token.pos_ == 'NOUN']
-        return nouns
+    def extract_kwds(self, text: str) -> List[str]:
+        """Extract nouns from the text."""
+        words = word_tokenize(text)
+        tagged_words = pos_tag(words)
+        return [word for word, pos in tagged_words if pos.startswith('NN')]
 
     def similarity(self, *kwds: str) -> float:
         """Calculate the similarity score based on the intersection of keyword sets."""
         if not kwds:
             return 0.0
-        # Convert the first list to a set
-        x = set(kwds[0])
-        # Compute the intersection with all other lists
-        for kw in kwds[1:]:
-            y = set(kw)
-            x = x.intersection(y)
-        # Compute the similarity score
-        # Return 0 if all lists are empty
-        if len(kwds) == 0 or min(len(kw) for kw in kwds) == 0:
+        if len(kwds) == 1:
+            return 1.0
+        if any(len(kw) == 0 for kw in kwds) and len(kwds) == 2:
             return 0.0
-        # Compute the minimum length of the input lists
-        min_len = min(len(kw) for kw in kwds)
-        
-        return len(x) / min_len
+        x = set(kwds[0])
+        for kw in kwds[1:]:
+            x.intersection_update(kw)
+        if not x:
+            return 0.0
+        min_len = min(len(kw) for kw in kwds if kw)
+        return len(x) / min_len if min_len else 0.0
     
 
 @dataclass
 class Filter:
     ctx: List[str]
     threshold: float
-    model: str
 
-    def __post_init__(self):
-        try:
-            _ = spacy.load(self.model)
-        except OSError:
-            subprocess.run(['python', '-m', 'spacy', 'download', self.model])
-            time.sleep(20)
-        finally:
-            self.nlp = spacy.load(self.model)
-
-        self.parser: Parser = Parser()
+    parser: Parser
 
     def __call__(self, target: str) -> Any:
-        kwds_list = []
+        s = time.perf_counter()
+        extracted_kwds = {}
+        results = []
 
-        tx_doc = self.nlp(target)
-        min_tx = self.parser.minimize(self.nlp, tx_doc)
-
-        min_tx_doc = self.nlp(min_tx)
-        tx_kwds = self.parser.extract_kwds(min_tx_doc)
-
-        for ctx in self.ctx:
-            doc = self.nlp(ctx)
-            min_qx = self.parser.minimize(self.nlp, doc)
-
-            min_doc = self.nlp(min_qx)
-            kwds = self.parser.extract_kwds(doc)
-            
-            kwds_list.append(kwds)
+        min_tx = self.parser.minimize(target)
+        tx_kwds = self.parser.extract_kwds(min_tx)
         
-        return [kwds for kwds in kwds_list if self.parser.similarity(tx_kwds, kwds) >= self.threshold]
-            
 
-    
+        for idx, ctx in enumerate(self.ctx): # for ctx in self.ctx:
+            min_qx = self.parser.minimize(ctx)
+            kwds = self.parser.extract_kwds(min_qx)
+            extracted_kwds[str(idx)] = {'kwds': kwds, 'c': ctx}
+        
+        for idx, v in extracted_kwds.items():
+            if self.parser.similarity(tx_kwds, v['kwds']) >= self.threshold:
+                results.append(v['c'])
+        e = time.perf_counter()
+        print(f"Time for filtering: {e-s} seconds")
+        return results
+
+
+if __name__ == "__main__":
+    f = Filter(ctx=["hello world", "hello universe"], threshold=0.5, parser=Parser())
+    print(f("hello universe"))

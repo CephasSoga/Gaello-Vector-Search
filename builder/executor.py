@@ -18,7 +18,7 @@ class Executor:
         self.builder = ContextBuilder(*args, **kwargs)
 
 
-    def build_context(self, embedding, fields: Dict[str, Any] = {}) -> List[Any]:
+    async def build_context(self, embedding, fields: Dict[str, Any] = {}) -> List[List[Dict]]:
         """
         Builds the context by executing vector search on multiple targets concurrently.
 
@@ -29,4 +29,4 @@ class Executor:
         Returns:
             List[Any]: The combined search results from all targets.
         """
-        return self.builder.build(embedding, fields)
+        return await self.builder.build(embedding, fields)

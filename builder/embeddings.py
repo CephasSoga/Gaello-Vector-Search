@@ -62,4 +62,25 @@ class VectorEmbeddingManager:
         if self.session:
             await self.session.close()  # Properly close the session when done
 
+async def main():
+    import time
+    s = time.perf_counter()
+    try:
+        manager = VectorEmbeddingManager()
+        manager.create_session()
+        e1  = time.perf_counter()
+        print(f"Time for creating session: {e1-s} seconds")
 
+        embedding = await manager.request('hello')
+        e2 = time.perf_counter()
+        print(f"Time for embedding: {e2-e1} seconds")
+        print(embedding  is not None)
+
+    finally:
+        await manager.close()
+    e = time.perf_counter()
+    print(f"Total runtime: {e-s} seconds")
+
+if __name__ == '__main__':
+    import asyncio
+    asyncio.run(main())
