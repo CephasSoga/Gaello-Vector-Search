@@ -14,30 +14,33 @@ from builder.executor import Executor
 from builder.embeddings import VectorEmbeddingManager
 from builder.vector_serach import _DEFAULT_LIMIT, _DEFAULT_NUM_CANDIDATES
 from filters.constraints import Parser, Filter
-from utils_vector.logs import Logger
+from utils_vector.logs import Logger, timer, async_timer
 
 logger = Logger("Vector Search")
 
 db_uri = get_env('MONGODB_URI')
 
-# Create a MongoClient instance and configure the server API version to use.
-client = MongoClient(db_uri, server_api=ServerApi('1'))
-
-# Send a ping to confirm a successful connection
-
-try:
-    s = time.perf_counter()
-    logger.log("info", "Attempting to connect to MongoDB...")
+@timer(logger=logger)
+def create_client() -> MongoClient | None:
     # Create a MongoClient instance and configure the server API version to use.
     client = MongoClient(db_uri, server_api=ServerApi('1'))
+
     # Send a ping to confirm a successful connection
-    client.admin.command('ping')
-    e = time.perf_counter()
-    logger.log("info", "Pinged your deployment. You successfully connected to MongoDB!")
-    logger.log("info", f"Connected to MongoDB in {e-s:.4f} seconds!")
-except Exception as e:
-    logger.log("error", f"Unable to connect to MongoDB: {e}")
-    client = None
+
+    try:
+        s = time.perf_counter()
+        logger.log("info", "Attempting to connect to MongoDB...")
+        # Create a MongoClient instance and configure the server API version to use.
+        client = MongoClient(db_uri, server_api=ServerApi('1'))
+        # Send a ping to confirm a successful connection
+        client.admin.command('ping')
+        e = time.perf_counter()
+        logger.log("info", "Pinged your deployment. You successfully connected to MongoDB!")
+        logger.log("info", f"Connected to MongoDB in {e-s:.4f} seconds!")
+        return client
+    except Exception as e:
+        logger.log("error", f"Unable to connect to MongoDB: {e}")
+        return None
 
 class ConnectionErrors(Enum):
     CONNECTION_FAILURE = ConnectionFailure
@@ -97,7 +100,7 @@ class ExecutorArg:
     
     def  __call__(self) -> Dict[str, str | int] :
         return self.map_to_dict()
-    
+@timer(logger)   
 def flatten_list(l: List[List[Any]]) -> List[Any]:
     if all(isinstance(item, list) for item in l):
         return [item for sublist in l for item in sublist]
@@ -105,7 +108,7 @@ def flatten_list(l: List[List[Any]]) -> List[Any]:
         raise TypeError("Input must be a list of lists. All items in the list must be of the same type.")
     
 @async_retry_on_connection_error([ConnectionErrors.CONNECTION_FAILURE, ConnectionErrors.SERVER_SELECTION_TIMEOUT, ConnectionErrors.CONNECTION_ERROR], retries=3, delay=2, backoff=2)
-async def _on_query(query: str, num_candidates: Optional[int] = _DEFAULT_NUM_CANDIDATES, limit_per_group: Optional[int] = _DEFAULT_LIMIT) -> List[str]:
+async def _on_query(client: MongoClient, query: str, num_candidates: Optional[int] = _DEFAULT_NUM_CANDIDATES, limit_per_group: Optional[int] = _DEFAULT_LIMIT) -> List[str]:
     """
     Handles a query by embedding the query and performing a vector search.
 
@@ -117,6 +120,39 @@ async def _on_query(query: str, num_candidates: Optional[int] = _DEFAULT_NUM_CAN
     Returns:
         List[str]: A list of strings representing the context of the query.
     """
+    ctx = []
+
+    @async_timer(logger)
+    async def embed_query(query: str) -> Any:
+        try:
+            embedder = VectorEmbeddingManager()
+            return await embedder.request(query)
+        except Exception as e:
+            logger.log("error", "Embedding error.", e)
+            raise
+        finally:
+            await embedder.close()
+
+    @async_timer(logger)
+    async def embedding_callback(embedding: Any, *args) -> List[Any]:
+        nonlocal ctx
+        executor = Executor(*args)
+        fields = {'_id': 0, 'content': 1, 'contentStr': 1}
+        ctx = await executor.build_context(embedding, fields=fields)
+
+        flatten_ctx = flatten_list(ctx)
+        return flatten_ctx
+
+    @timer(logger)
+    def filter_search(query: str, flatten_ctx: List[Any], stop_index: int = 3) -> List[Any]:
+        #parser = Parser()
+        #filter = Filter([c.get('contentStr') for c in flatten_ctx if c.get('contentStr')], 0.0, parser) # Filtering the context
+
+        #final_ctx = filter(query)
+
+        #return final_ctx
+        return flatten_ctx[:stop_index]
+
     if not num_candidates or not limit_per_group:
         return []
     
@@ -145,41 +181,23 @@ async def _on_query(query: str, num_candidates: Optional[int] = _DEFAULT_NUM_CAN
 
         args = arg_1, arg_2, # more...
 
-        ctx = []
+        # embed query here
+        embedding = await embed_query(query)
 
-        _s0 = time.perf_counter()
-        
-        embedder = VectorEmbeddingManager()
-        embedding = await embedder.request(query)
+        # on embedding callback
+        ctx = await embedding_callback(embedding, *args)
 
-        _e0 = time.perf_counter()
-        
-        logger.log("info", f"Finished embedding query in {_e0 - _s0:.4f}s")
-
-        _s1 = time.perf_counter()
-
-        executor = Executor(*args)
-        fields = {'_id': 0, 'content': 1, 'contentStr': 1}
-        ctx = await executor.build_context(embedding, fields=fields)
-
-        flatten_ctx = flatten_list(ctx)
-
-        parser = Parser()
-        filter = Filter([c.get('contentStr') for c in flatten_ctx if c.get('contentStr')], 0.0, parser) # Filtering the context
-
-        final_ctx = filter(query)
-        
-        _e1 = time.perf_counter()
-        
-        logger.log("info", f"Finished vector search in {_e1 - _s1:.4f}s")
+        # on filter search
+        final_ctx = filter_search(query, ctx)
 
         return final_ctx
-    finally:
-        await embedder.close()
-    
 
+    except Exception as e:
+        logger.log("error", "Error while performing vector search", e)
+        logger.log("warning", "Vector search aborted. Returning an empty list")
+        raise
 
-async def call(query: str, num_candidates: Optional[int] = _DEFAULT_NUM_CANDIDATES, limit_per_group: Optional[int] = _DEFAULT_LIMIT) -> List[Any]:
+async def call(client: MongoClient, query: str, num_candidates: Optional[int] = _DEFAULT_NUM_CANDIDATES, limit_per_group: Optional[int] = _DEFAULT_LIMIT) -> List[Any]:
     """
     Main access function of the vector search. Handles a query by performing a vector search.
 
@@ -190,14 +208,20 @@ async def call(query: str, num_candidates: Optional[int] = _DEFAULT_NUM_CANDIDAT
         List[str]: A list of strings representing the result of the query.
     """
     try:
-        return await _on_query(query, num_candidates, limit_per_group)
+        return await _on_query(client, query, num_candidates, limit_per_group)
     except Exception as e:
         logger.log("error", "Error while performing vector search", e)
         logger.log("warning", "Vector search aborted. Returning an empty list")
         raise
 
+@async_timer(logger)
 async def main(query: str, num_candidates: Optional[int] = _DEFAULT_NUM_CANDIDATES, limit_per_group: Optional[int] = _DEFAULT_LIMIT): 
-    ctx = await call(query, num_candidates, limit_per_group)
+    # create client
+    client = create_client()
+    if not client:
+        raise ValueError("No client found. Aborting...")
+
+    ctx = await call(client, query, num_candidates, limit_per_group)
 
     if isinstance (ctx, list):
         print("Context totat components: ", len(ctx))
@@ -206,4 +230,4 @@ async def main(query: str, num_candidates: Optional[int] = _DEFAULT_NUM_CANDIDAT
         #    print(c[0], "...\n")
 
 if __name__ == "__main__":
-    asyncio.run(main('hello'))
+    asyncio.run(main('is the apple stock going down? i heard it is!'))
