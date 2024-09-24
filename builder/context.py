@@ -1,5 +1,10 @@
 import asyncio
+import numpy as np
+import concurrent.futures as cf
+from dataclasses import dataclass
 from typing import Dict, Any, List
+
+from sklearn.metrics.pairwise import cosine_similarity
 
 from builder.vector_serach import VectorSearchManager
 
@@ -24,3 +29,50 @@ class ContextBuilder:
         v = VectorSearchManager(**target)
         return  await v.request(embedding, **fields)
 
+
+@dataclass
+class Filter:
+    query_embedding: np.ndarray
+    ctx_items: List[Dict]
+    threshold: float
+    batch_size: int
+
+    def process_batch(self, query_embedding: np.ndarray, ctx_items: List[Dict], threshold: float) -> List[Dict]:
+        
+            ctx_embeddings = [
+                np.array(
+                    item.get("content_embedding") 
+                    or item.get("name_embedding") 
+                    or item.get("description_embedding") 
+                    or item.get("price_embedding")
+                ) for item in ctx_items
+            ]
+            
+            similarities = cosine_similarity(ctx_embeddings, query_embedding.reshape(1, -1)).flatten()
+
+            # Filter out the context items with similarity below the threshold
+            return [
+                    {
+                        "id": item.get("_id"),
+                        "description": item.get("description"),
+                        "name": item.get("name"),
+                        "price": item.get("price"),
+                        "content": item.get("content") or item.get("contentStr"),
+                        "score": similarity
+                    } for item, similarity in zip(ctx_items, similarities) 
+                    if similarity >= threshold
+                ]
+    
+    def __call__(self):
+        with cf.ThreadPoolExecutor() as executor:
+            futures = []
+            # Iterate over the context items in batches
+            for batch in range(0, len(self.ctx_items), self.batch_size):
+                batch_items = self.ctx_items[batch:batch + self.batch_size]
+                # Submit each batch to the executor
+                future = executor.submit(self.process_batch, self.query_embedding, batch_items, self.threshold)
+                futures.append(future)
+
+            # Yield the results once futures complete
+            for future in cf.as_completed(futures):
+                yield future.result()

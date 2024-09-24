@@ -12,8 +12,8 @@ from pymongo.server_api import ServerApi
 from utils_vector.envhandler import get_env
 from builder.executor import Executor
 from builder.embeddings import VectorEmbeddingManager
-from builder.vector_serach import _DEFAULT_LIMIT, _DEFAULT_NUM_CANDIDATES
-from filters.constraints import Parser, Filter
+from builder.context import Filter
+from config.static import SearchArgs, SearchBalancer
 from utils_vector.logs import Logger, timer, async_timer
 
 logger = Logger("Vector Search")
@@ -83,8 +83,8 @@ class ExecutorArg:
     collection_name: str
     path: str
     index: str
-    num_candidates: Optional[int] = _DEFAULT_NUM_CANDIDATES
-    limit: Optional[int] = _DEFAULT_LIMIT
+    num_candidates: Optional[int]
+    limit: Optional[int]
     connec_client: Optional[MongoClient] = None
 
     def map_to_dict(self) -> dict[str, Any]:
@@ -100,6 +100,7 @@ class ExecutorArg:
     
     def  __call__(self) -> Dict[str, str | int] :
         return self.map_to_dict()
+    
 @timer(logger)   
 def flatten_list(l: List[List[Any]]) -> List[Any]:
     if all(isinstance(item, list) for item in l):
@@ -107,8 +108,12 @@ def flatten_list(l: List[List[Any]]) -> List[Any]:
     else:
         raise TypeError("Input must be a list of lists. All items in the list must be of the same type.")
     
-@async_retry_on_connection_error([ConnectionErrors.CONNECTION_FAILURE, ConnectionErrors.SERVER_SELECTION_TIMEOUT, ConnectionErrors.CONNECTION_ERROR], retries=3, delay=2, backoff=2)
-async def _on_query(client: MongoClient, query: str, num_candidates: Optional[int] = _DEFAULT_NUM_CANDIDATES, limit_per_group: Optional[int] = _DEFAULT_LIMIT) -> List[str]:
+@async_retry_on_connection_error([
+    ConnectionErrors.CONNECTION_FAILURE, 
+    ConnectionErrors.SERVER_SELECTION_TIMEOUT, 
+    ConnectionErrors.CONNECTION_ERROR], 
+    retries=3, delay=2, backoff=2)
+async def _on_query(client: MongoClient, query: str) -> List[str]:
     """
     Handles a query by embedding the query and performing a vector search.
 
@@ -137,43 +142,41 @@ async def _on_query(client: MongoClient, query: str, num_candidates: Optional[in
     async def embedding_callback(embedding: Any, *args) -> List[Any]:
         nonlocal ctx
         executor = Executor(*args)
-        fields = {'_id': 0, 'content': 1, 'contentStr': 1}
+        fields = {
+            '_id': 1, 
+            'content': 1, 
+            'contentStr': 1, 
+            'content_embedding': 1, 
+            'name_embedding': 1, 
+            'description_embedding': 1, 
+            'price_embedding': 1
+        }
         ctx = await executor.build_context(embedding, fields=fields)
 
         flatten_ctx = flatten_list(ctx)
         return flatten_ctx
 
     @timer(logger)
-    def filter_search(query: str, flatten_ctx: List[Any], stop_index: int = 3) -> List[Any]:
-        #parser = Parser()
-        #filter = Filter([c.get('contentStr') for c in flatten_ctx if c.get('contentStr')], 0.0, parser) # Filtering the context
+    def filter_search(query_embedding: Any, flatten_ctx: List[Any]) -> List[Any]:
+        filter = Filter(
+            query_embedding, 
+            flatten_ctx, 
+            threshold=SearchBalancer.THRESHOLD,
+            batch_size=SearchBalancer.BATCH_SIZE    
+        ) # Filtering the context
 
-        #final_ctx = filter(query)
+        final_ctx = list(filter())
 
-        #return final_ctx
-        return flatten_ctx[:stop_index]
-
-    if not num_candidates or not limit_per_group:
-        return []
+        return final_ctx[:SearchBalancer.STOP_INDEX] # apply stop index according to context tokesns limit 
     
     try:
         arg_1 = ExecutorArg(
-            database_name = 'market',
-            collection_name = 'articles',
-            path  = 'content_embedding',
-            index = 'article_index',
-            num_candidates = num_candidates,
-            limit = limit_per_group,
+            **SearchArgs.TICKERS.value,
             connec_client = client
         )()
 
         arg_2 = ExecutorArg(
-            database_name = 'market',
-            collection_name = 'ticker',
-            path  = 'name_embedding',
-            index = 'ticker_index',
-            num_candidates = num_candidates,
-            limit = limit_per_group,
+            **SearchArgs.ARTICLES.value,
             connec_client = client
         )()
 
@@ -197,7 +200,8 @@ async def _on_query(client: MongoClient, query: str, num_candidates: Optional[in
         logger.log("warning", "Vector search aborted. Returning an empty list")
         raise
 
-async def call(client: MongoClient, query: str, num_candidates: Optional[int] = _DEFAULT_NUM_CANDIDATES, limit_per_group: Optional[int] = _DEFAULT_LIMIT) -> List[Any]:
+async def call(
+    client: MongoClient, query: str) -> List[Any]:
     """
     Main access function of the vector search. Handles a query by performing a vector search.
 
@@ -208,20 +212,20 @@ async def call(client: MongoClient, query: str, num_candidates: Optional[int] = 
         List[str]: A list of strings representing the result of the query.
     """
     try:
-        return await _on_query(client, query, num_candidates, limit_per_group)
+        return await _on_query(client, query)
     except Exception as e:
         logger.log("error", "Error while performing vector search", e)
         logger.log("warning", "Vector search aborted. Returning an empty list")
         raise
 
 @async_timer(logger)
-async def main(query: str, num_candidates: Optional[int] = _DEFAULT_NUM_CANDIDATES, limit_per_group: Optional[int] = _DEFAULT_LIMIT): 
+async def main(query: str) -> None: 
     # create client
     client = create_client()
     if not client:
         raise ValueError("No client found. Aborting...")
 
-    ctx = await call(client, query, num_candidates, limit_per_group)
+    ctx = await call(client, query)
 
     if isinstance (ctx, list):
         print("Context totat components: ", len(ctx))

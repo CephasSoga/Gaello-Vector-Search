@@ -5,11 +5,8 @@ from typing import Optional, List, Dict
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 
+from config.static import SearchBalancer
 from utils_vector.envhandler import get_env
-
-_DEFAULT_NUM_CANDIDATES = 50
-_DEFAULT_LIMIT = 50
-
 
 class VectorSearchManager:
     """
@@ -20,8 +17,8 @@ class VectorSearchManager:
         collection_name: str,         
         path: str,
         index: str, 
-        num_candidates: int = _DEFAULT_NUM_CANDIDATES, 
-        limit: int = _DEFAULT_LIMIT,
+        num_candidates: int = SearchBalancer.DEFAULT_NUM_CANDIDATES, 
+        limit: int = SearchBalancer.DEFAULT_LIMIT_PER_GROUP,
         connec_client: Optional[MongoClient] = None 
         
         ):
