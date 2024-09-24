@@ -1,5 +1,4 @@
 import time
-import aiohttp
 import asyncio
 import functools
 from enum import Enum
@@ -26,7 +25,6 @@ def create_client() -> MongoClient | None:
     client = MongoClient(db_uri, server_api=ServerApi('1'))
 
     # Send a ping to confirm a successful connection
-
     try:
         s = time.perf_counter()
         logger.log("info", "Attempting to connect to MongoDB...")
@@ -158,17 +156,17 @@ async def _on_query(client: MongoClient, query: str) -> List[str]:
 
     @timer(logger)
     def filter_search(query_embedding: Any, flatten_ctx: List[Any]) -> List[Any]:
+        # instanciate the filter
         filter = Filter(
             query_embedding, 
             flatten_ctx, 
             threshold=SearchBalancer.THRESHOLD,
             batch_size=SearchBalancer.BATCH_SIZE    
-        ) # Filtering the context
-
-        final_ctx = list(filter())
-
-        return final_ctx[:SearchBalancer.STOP_INDEX] # apply stop index according to context tokesns limit 
-    
+        ) 
+        # Filtering the context and flattening it
+        final_ctx = flatten_list(list(filter()))
+        # apply stop index according to context tokens limit 
+        return final_ctx[:SearchBalancer.STOP_INDEX] 
     try:
         arg_1 = ExecutorArg(
             **SearchArgs.TICKERS.value,
@@ -179,19 +177,14 @@ async def _on_query(client: MongoClient, query: str) -> List[str]:
             **SearchArgs.ARTICLES.value,
             connec_client = client
         )()
-
         # more...
-
         args = arg_1, arg_2, # more...
-
         # embed query here
         embedding = await embed_query(query)
-
         # on embedding callback
         ctx = await embedding_callback(embedding, *args)
-
         # on filter search
-        final_ctx = filter_search(query, ctx)
+        final_ctx = filter_search(embedding, ctx)
 
         return final_ctx
 
@@ -229,9 +222,10 @@ async def main(query: str) -> None:
 
     if isinstance (ctx, list):
         print("Context totat components: ", len(ctx))
-        #for c in ctx:
-        #    print("Context component: ", "\n")
-        #    print(c[0], "...\n")
+        for c in ctx:
+            print(f'{c["_id"]}: {c["score"]}')
+    else:
+        print("Warning! Returned value seems to be valid but is nor a list. [Did not return a list]")
 
 if __name__ == "__main__":
     asyncio.run(main('is the apple stock going down? i heard it is!'))

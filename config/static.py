@@ -14,7 +14,7 @@ class SearchBalancer:
     DEFAULT_LIMIT:  int = 50
     STOP_INDEX: int = 32
     BATCH_SIZE: int = 1024
-    THRESHOLD: float = 0.0
+    THRESHOLD: float = 0.5
 
 class SearchStrategy(Enum):
     FILTER = None
@@ -24,7 +24,7 @@ class SearchArgs(Enum):
     ARTICLES = {
         "database_name" : "market",
         "collection_name" : "articles",
-        "path" : "content_embeddings",
+        "path" : "content_embedding",
         "index" : "article_index",
         "num_candidates" : SearchBalancer.DEFAULT_NUM_CANDIDATES,
         "limit" : SearchBalancer.DEFAULT_LIMIT_PER_GROUP,
@@ -33,7 +33,7 @@ class SearchArgs(Enum):
     TICKERS = {
         "database_name" : "market",
         "collection_name" : "tickers",
-        "path" : "name_embeddings",
+        "path" : "name_embedding",
         "index" : "ticker_index",
         "num_candidates" : SearchBalancer.DEFAULT_NUM_CANDIDATES,
         "limit" : SearchBalancer.DEFAULT_LIMIT_PER_GROUP,
@@ -42,7 +42,7 @@ class SearchArgs(Enum):
     FOREX = {
         "database_name" : "market",
         "collection_name" : "forex",
-        "path" : "price_embeddings",
+        "path" : "price_embedding",
         "index" : "forex_index",
         "num_candidates" : SearchBalancer.DEFAULT_NUM_CANDIDATES,
         "limit" : SearchBalancer.DEFAULT_LIMIT_PER_GROUP,
@@ -51,7 +51,7 @@ class SearchArgs(Enum):
     CRYPTOS = {
         "database_name" : "market",
         "collection_name" : "cryptos",
-        "path" : "price_embeddings",
+        "path" : "price_embedding",
         "index" : "crypto_index",
         "num_candidates" : SearchBalancer.DEFAULT_NUM_CANDIDATES,
         "limit" : SearchBalancer.DEFAULT_LIMIT_PER_GROUP,

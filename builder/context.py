@@ -2,7 +2,7 @@ import asyncio
 import numpy as np
 import concurrent.futures as cf
 from dataclasses import dataclass
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Union
 
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -32,13 +32,15 @@ class ContextBuilder:
 
 @dataclass
 class Filter:
-    query_embedding: np.ndarray
+    query_embedding: Union[List, np.ndarray]
     ctx_items: List[Dict]
     threshold: float
     batch_size: int
 
-    def process_batch(self, query_embedding: np.ndarray, ctx_items: List[Dict], threshold: float) -> List[Dict]:
-        
+    def process_batch(self, query_embedding: Union[List, np.ndarray], ctx_items: List[Dict], threshold: float) -> List[Dict]:
+            if isinstance(query_embedding, list):
+                query_embedding = np.array(query_embedding)
+                
             ctx_embeddings = [
                 np.array(
                     item.get("content_embedding") 
@@ -53,7 +55,7 @@ class Filter:
             # Filter out the context items with similarity below the threshold
             return [
                     {
-                        "id": item.get("_id"),
+                        "_id": item.get("_id"),
                         "description": item.get("description"),
                         "name": item.get("name"),
                         "price": item.get("price"),
