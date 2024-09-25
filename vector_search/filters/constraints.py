@@ -9,7 +9,7 @@ from nltk.tokenize import word_tokenize
 from nltk import pos_tag
 from functools import lru_cache
 
-from utils_vector.logs import timer
+from vector_search.utils.logs import timer
 
 
 def download_nltk_data():

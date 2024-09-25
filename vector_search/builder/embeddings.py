@@ -1,6 +1,6 @@
 import aiohttp
 
-from utils_vector.envhandler import get_env
+from vector_search.utils.envhandler import get_env
 
 class VectorEmbeddingManager:
     """

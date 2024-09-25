@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Union
 
 from sklearn.metrics.pairwise import cosine_similarity
 
-from builder.vector_serach import VectorSearchManager
+from vector_search.builder.serach import VectorSearchManager
 
 
 class ContextBuilder:

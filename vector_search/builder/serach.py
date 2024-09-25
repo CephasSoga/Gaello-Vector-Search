@@ -5,8 +5,8 @@ from typing import Optional, List, Dict
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 
-from config.static import SearchBalancer
-from utils_vector.envhandler import get_env
+from vector_search.config.static import SearchBalancer
+from vector_search.utils.envhandler import get_env
 
 class VectorSearchManager:
     """

@@ -1,6 +1,6 @@
 from typing import Dict, List, Any
 
-from builder.context import ContextBuilder
+from vector_search.builder.context import ContextBuilder
 
 class Executor:
     """

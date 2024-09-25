@@ -8,12 +8,12 @@ from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 
-from utils_vector.envhandler import get_env
-from builder.executor import Executor
-from builder.embeddings import VectorEmbeddingManager
-from builder.context import Filter
-from config.static import SearchArgs, SearchBalancer
-from utils_vector.logs import Logger, timer, async_timer
+from vector_search.utils.envhandler import get_env
+from vector_search.builder.executor import Executor
+from vector_search.builder.embeddings import VectorEmbeddingManager
+from vector_search.builder.context import Filter
+from vector_search.config.static import SearchArgs, SearchBalancer
+from vector_search.utils.logs import Logger, timer, async_timer
 
 logger = Logger("Vector Search")
 
@@ -193,13 +193,18 @@ async def _on_query(client: MongoClient, query: str) -> List[str]:
         logger.log("warning", "Vector search aborted. Returning an empty list")
         raise
 
-async def call(
-    client: MongoClient, query: str) -> List[Any]:
+async def search(client: MongoClient, query: str) -> List[Any]:
     """
-    Main access function of the vector search. Handles a query by performing a vector search.
+    Main access function of the vector search. Provides a high-level handling of the vector search.
+
+    First, a list of `ExecutorArg` objects is created. Then, the vector search is performed by calling the
+    `Executor` class with the list of ExecutorArg objects. 
+    Finally, the search results are filtered to return the `n` most relevant results.
 
     Args:
-        query (str): The query to be searched.
+        client (MongoClient): The MongoClient object.
+        query (str): The query to be searched for. Since the search is vector based, the query is first embedded 
+        so that the result of the search  can be similarity based.
 
     Returns:
         List[str]: A list of strings representing the result of the query.
@@ -218,7 +223,7 @@ async def main(query: str) -> None:
     if not client:
         raise ValueError("No client found. Aborting...")
 
-    ctx = await call(client, query)
+    ctx = await search(client, query)
 
     if isinstance (ctx, list):
         print("Context totat components: ", len(ctx))
